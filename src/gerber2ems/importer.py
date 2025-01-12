@@ -9,9 +9,8 @@ import sys
 import re
 
 import PIL.Image
+from matplotlib.figure import Figure
 import numpy as np
-from nanomesh import Image
-from nanomesh import Mesher2D
 import matplotlib.pyplot as plt
 
 from gerber2ems.config import Config
@@ -22,6 +21,9 @@ from gerber2ems.constants import (
     BORDER_THICKNESS,
     STACKUP_FORMAT_VERSION,
 )
+
+import cv2
+from triangle import triangulate
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ def gbr_to_png(gerber_filename: str, edge_filename: str, output_filename: str) -
         logger.warning("DPI is not an integer number: %f", dpi)
 
     gerbv_command = f"gerbv {gerber_filename} {edge_filename}"
-    gerbv_command += " --background=#000000 --foreground=#ffffffff --foreground=#0000ff"
+    gerbv_command += " --background=#000000 --foreground=#ffffffff --foreground=#ffffffff"
     gerbv_command += f" -o {not_cropped_name}"
     gerbv_command += f" --dpi={dpi} --export=png -a"
 
@@ -101,6 +103,143 @@ def get_dimensions(input_filename: str) -> Tuple[int, int]:
     return (width, height)
 
 
+####
+
+
+def image_to_mesh(path):
+
+    im = cv2.transpose(cv2.imread(path))
+
+    assert im is not None, "file could not be read, check with os.path.exists()"
+
+    imgray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(imgray, 20, 255, 0)
+    _contours, _hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    hierarchy = _hierarchy[0]
+    contours = [cv2.approxPolyDP(cnt, 2, True) for cnt in _contours]
+
+    def find_point_inside_contour(i):
+        contour = contours[i]
+
+        x, y, w, h = cv2.boundingRect(contour)
+        for px in range(x, x + w):
+            for py in range(y, y + h):
+                if cv2.pointPolygonTest(contour, (px, py), False) > 0:
+                    children = get_children(i)
+                    for child in children:
+                        if cv2.pointPolygonTest(contours[child], (px, py), False) >= 0:
+                            continue
+                    return [px, py]
+        raise Exception("Oh no 0 space contour")
+
+    def pont_in_contour(i):
+        # Calculate centroid of the contour (always inside if shape is convex)
+        cnt = contours[i]
+        M = cv2.moments(cnt)
+
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+
+        if cv2.pointPolygonTest(cnt, (cx, cy), False) <= 0:
+            return find_point_inside_contour(i)
+
+        children = get_children(i)
+        for child in children:
+            if cv2.pointPolygonTest(contours[child], (cx, cy), False) >= 0:
+                return find_point_inside_contour(i)
+
+        return [cx, cy]
+
+    def is_hole(i):
+        _, _, _, p = hierarchy[i]
+
+        if p == -1:
+            return False
+        
+        return not is_hole(p)
+        
+    def get_children(i):
+        _, _, next, _ = hierarchy[i]
+
+        children = []
+
+        while next != -1:
+            children.append(next)
+            next, _, _, _ = hierarchy[next]
+
+        return children
+
+    # Plot cntrs result
+    if Config.get().arguments.debug:
+        cv2.drawContours(im, contours, -1, (0, 255, 0), 3)
+        plt.imshow(im)
+        plt.show(block=True)
+
+    triangles = []
+    for i, cnt in enumerate(contours):
+        if is_hole(i):
+            continue
+        
+        pts = np.array(cnt).reshape(-1, 2).tolist()
+
+
+        children = get_children(i)
+
+        segments = [[i, (i+1) % len(pts)] for i in range(len(pts))]
+        holes = []
+        for child in children:
+            shift = len(pts)
+
+            _pts = np.array(contours[child]).reshape(-1, 2).tolist()
+            _segments = [[shift + i, shift + ((i+1) % len(_pts))] for i in range(len(_pts))]
+
+            pts.extend(_pts)
+            segments.extend(_segments)
+            holes.append(pont_in_contour(child))
+
+
+        poly_dict = {
+            "vertices": pts, 
+            "segments": segments,
+            **({"holes": holes} if holes else {})
+        }
+        
+        # Perform Constrained Delaunay Triangulation
+        result = triangulate(poly_dict, 'pa10000')  # 'p' ensures a constrained triangulation
+
+        for tri in result['triangles']:
+            ret = []
+            for p in tri:
+                x = result['vertices'][p][0]
+                y = result['vertices'][p][1]
+                point = np.array([x, y]) 
+                ret.append(image_to_board_coordinates(point))
+            triangles.append(ret)
+
+    # Plot triangulated result
+    if Config.get().arguments.debug:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+
+        # h, w = im.shape[:2]
+        # aspect_ratio = h / w
+        # ax.set_aspect(aspect_ratio, adjustable="box")
+
+        for tri in triangles:
+            xs = []
+            ys = []
+            for x, y in tri:
+                xs.append(x)
+                ys.append(y)
+            ax.fill(ys, xs, facecolor='lightblue', edgecolor='black', alpha=0.7) # Transposed to match PCB coords
+
+        plt.show(block=True)
+
+    return np.array(triangles)
+
+####
+
 def get_triangles(input_filename: str) -> np.ndarray:
     """Triangulate image.
 
@@ -110,43 +249,7 @@ def get_triangles(input_filename: str) -> np.ndarray:
     Returns a list of triangles, where each triangle consists of coordinates for each vertex.
     """
     path = os.path.join(GEOMETRY_DIR, input_filename)
-    image = PIL.Image.open(path)
-    gray = image.convert("L")
-    thresh = gray.point(lambda p: 255 if p < 230 else 0)
-    copper = Image(np.array(thresh))
-
-    mesher = Mesher2D(copper)
-    # These constans are set so there won't be to many triangles.
-    # If in some case triangles are too coarse they should be adjusted
-    mesher.generate_contour(max_edge_dist=10000, precision=2)
-    mesher.plot_contour()
-    mesh = mesher.triangulate(opts="a100000")
-
-    if Config.get().arguments.debug:
-        filename = os.path.join(os.getcwd(), GEOMETRY_DIR, input_filename + "_mesh.png")
-        logger.debug("Saving mesh to file: %s", filename)
-        mesh.plot_mpl()
-        plt.savefig(filename, dpi=300)
-
-    points = mesh.get("triangle").points
-    cells = mesh.get("triangle").cells
-    kinds = mesh.get("triangle").cell_data["physical"]
-
-    triangles: np.ndarray = np.empty((len(cells), 3, 2))
-    for i, cell in enumerate(cells):
-        triangles[i] = [
-            image_to_board_coordinates(points[cell[0]]),
-            image_to_board_coordinates(points[cell[1]]),
-            image_to_board_coordinates(points[cell[2]]),
-        ]
-
-    # Selecting only triangles that represent copper
-    mask = kinds == 2.0
-
-    logger.debug("Found %d triangles for %s", len(triangles[mask]), input_filename)
-
-    return triangles[mask]
-
+    return image_to_mesh(path)
 
 def image_to_board_coordinates(point: np.ndarray) -> np.ndarray:
     """Transform point coordinates from image to board coordinates."""

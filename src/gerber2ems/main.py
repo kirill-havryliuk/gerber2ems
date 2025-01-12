@@ -93,7 +93,6 @@ def geometry(sim: Simulation) -> None:
         sim.add_dump_boxes()
     sim.set_boundary_conditions(pml=False)
     sim.add_vias()
-    add_ports(sim)
     sim.save_geometry()
 
 
@@ -103,7 +102,7 @@ def simulate(threads: None | int = None) -> None:
         if port.excite:
             sim = Simulation()
             importer.import_stackup()
-            sim.create_materials()
+            # sim.create_materials()
             sim.set_excitation()
             logging.info("Simulating with excitation on port #%i", index)
             sim.load_geometry()

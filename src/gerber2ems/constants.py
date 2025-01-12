@@ -10,7 +10,7 @@ RESULTS_DIR = os.path.join(BASE_DIR, "results")
 PLOT_STYLE = os.path.join(os.path.abspath(os.path.dirname(__file__)), "antmicro.mplstyle")
 
 # Thickness of edge border line (gerber will be cropped by this value)
-BORDER_THICKNESS = 50
+BORDER_THICKNESS = 0
 # Via geometry is aproximated using n-sided right prism
 VIA_POLYGON = 8
 

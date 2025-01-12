@@ -414,9 +414,9 @@ class Simulation:
         logger.info("Starting simulation")
         cwd = os.getcwd()
         if threads is not None:
-            self.fdtd.Run(os.path.join(os.getcwd(), SIMULATION_DIR, str(excited_port_number)), numThreads=threads)
+            self.fdtd.Run(os.path.join(os.getcwd(), SIMULATION_DIR, str(excited_port_number)), numThreads=threads, debug_csx=True)
         else:
-            self.fdtd.Run(os.path.join(os.getcwd(), SIMULATION_DIR, str(excited_port_number)))
+            self.fdtd.Run(os.path.join(os.getcwd(), SIMULATION_DIR, str(excited_port_number)), debug_csx=True)
 
         os.chdir(cwd)
 
@@ -453,8 +453,9 @@ class Simulation:
             try:
                 port.CalcPort(result_path, frequencies)
                 logger.debug("Found data for port %d", index)
-            except IOError:
+            except IOError as ex:
                 logger.error("Port data files do not exist. Did you run simulation step?")
+                logger.error(ex)
                 sys.exit(1)
             incident.append(port.uf_inc)
             reflected.append(port.uf_ref)

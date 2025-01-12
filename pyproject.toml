@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gerber2ems"
 version = "0.99.0"
-dependencies = ["numpy", "matplotlib", "coloredlogs", "nanomesh", "scikit-rf", "Pillow"]
+dependencies = ["numpy", "matplotlib", "coloredlogs", "scikit-rf", "Pillow", "triangle"]
 scripts = {gerber2ems = "gerber2ems.main:main"}
 
 [tool.setuptools.package-data]
