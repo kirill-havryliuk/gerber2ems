@@ -160,9 +160,8 @@ class Simulation:
         for contour in contours:
             points: List[List[float]] = [[], []]
             for point in contour:
-                # Half of the border thickness is subtracted as image is shifted by it
-                points[0].append((point[1]))
-                points[1].append(Config.get().pcb_height - point[0])
+                points[0].append(point[0])
+                points[1].append(point[1])
 
             self.gerber_materials[layer_index].AddPolygon(points, "z", z_height, priority=1)
 

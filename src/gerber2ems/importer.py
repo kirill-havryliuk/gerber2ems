@@ -108,9 +108,11 @@ def get_dimensions(input_filename: str) -> Tuple[int, int]:
 
 def image_to_mesh(path):
 
-    im = cv2.transpose(cv2.imread(path))
+    _im = cv2.imread(path)
+    assert _im is not None, "file could not be read"
 
-    assert im is not None, "file could not be read, check with os.path.exists()"
+    im = cv2.flip(_im, 0) 
+
 
     imgray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(imgray, 20, 255, 0)
@@ -174,6 +176,7 @@ def image_to_mesh(path):
     # Plot cntrs result
     if Config.get().arguments.debug:
         cv2.drawContours(im, contours, -1, (0, 255, 0), 3)
+
         plt.imshow(im)
         plt.show(block=True)
 
@@ -232,7 +235,7 @@ def image_to_mesh(path):
             for x, y in tri:
                 xs.append(x)
                 ys.append(y)
-            ax.fill(ys, xs, facecolor='lightblue', edgecolor='black', alpha=0.7) # Transposed to match PCB coords
+            ax.fill(xs, ys, facecolor='lightblue', edgecolor='black', alpha=0.7)
 
         plt.show(block=True)
 
